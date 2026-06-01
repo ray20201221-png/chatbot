@@ -7,10 +7,12 @@ const isAdmin = localStorage.getItem("is_admin") === "1";
 const adminButton = document.getElementById("adminButton");
 const userBadge = document.getElementById("userBadge");
 const conversationList = document.getElementById("conversationList");
+const conversationSearch = document.getElementById("conversationSearch");
 const webSearchButton = document.getElementById("webSearchButton");
 const searchModeSelect = document.getElementById("searchMode");
 let activeConversationId = null;
 let searchMode = localStorage.getItem("search_mode") || (localStorage.getItem("web_search") === "1" ? "web" : "auto");
+let lastUserMessage = "";
 
 document.body.classList.add("app-ready");
 
@@ -132,10 +134,21 @@ function addBotShell(){
 function renderSourceCards(row, data){
     const webSources = data.web_sources || [];
     const ragSources = data.sources || [];
-    if(!webSources.length && !ragSources.length) return;
+    const confidence = data.source_confidence;
+    if(!webSources.length && !ragSources.length && !confidence) return;
 
     const panel = document.createElement("div");
     panel.className = "source-panel";
+
+    if(confidence){
+        const summary = document.createElement("div");
+        summary.className = `source-confidence ${confidence.level || "low"}`;
+        summary.innerHTML = `
+            <strong>${escapeHtml(t("sourceConfidence"))}: ${escapeHtml(confidence.level || "low")}</strong>
+            <span>${escapeHtml(confidence.reason || "")}</span>
+        `;
+        panel.appendChild(summary);
+    }
 
     webSources.forEach(source => {
         const card = document.createElement("a");
@@ -144,8 +157,9 @@ function renderSourceCards(row, data){
         card.target = "_blank";
         card.rel = "noopener noreferrer";
         card.innerHTML = `
-            <span>${escapeHtml(source.provider || "web")}</span>
+            <span>${escapeHtml(source.provider || "web")} · ${escapeHtml(source.credibility || "unknown")} · [${escapeHtml(source.citation || "?")}]</span>
             <strong>${escapeHtml(source.title || source.url)}</strong>
+            <p>${escapeHtml(source.domain || "")}</p>
             <p>${escapeHtml(source.snippet || "")}</p>
         `;
         panel.appendChild(card);
@@ -155,8 +169,9 @@ function renderSourceCards(row, data){
         const card = document.createElement("div");
         card.className = "source-card";
         card.innerHTML = `
-            <span>RAG</span>
+            <span>RAG · [${escapeHtml(source.citation || "?")}]</span>
             <strong>${escapeHtml(source.source)}#${escapeHtml(source.chunk)}</strong>
+            <p>${escapeHtml(source.domain || "knowledge-base")}</p>
             <p>Score: ${escapeHtml(source.score)}</p>
         `;
         panel.appendChild(card);
@@ -165,12 +180,18 @@ function renderSourceCards(row, data){
     row.appendChild(panel);
 }
 
-function renderFeedback(row, messageId){
+function renderFeedback(row, messageId, replyText){
     if(!messageId) return;
 
     const controls = document.createElement("div");
     controls.className = "feedback-row";
     controls.innerHTML = `
+        <button type="button" title="${t("copyAnswer")}" onclick="copyAnswer(this)">
+            <i data-lucide="copy"></i>
+        </button>
+        <button type="button" title="${t("regenerate")}" onclick="regenerateAnswer()">
+            <i data-lucide="rotate-cw"></i>
+        </button>
         <button type="button" title="${t("goodAnswer")}" onclick="rateAnswer(${messageId}, 'up', this)">
             <i data-lucide="thumbs-up"></i>
         </button>
@@ -178,10 +199,20 @@ function renderFeedback(row, messageId){
             <i data-lucide="thumbs-down"></i>
         </button>
     `;
+    controls.dataset.answer = replyText || "";
     row.appendChild(controls);
     if(window.lucide){
         lucide.createIcons();
     }
+}
+
+async function copyAnswer(button){
+    const text = button.parentElement.dataset.answer || "";
+    if(!text) return;
+
+    await navigator.clipboard.writeText(text);
+    button.classList.add("active");
+    setTimeout(() => button.classList.remove("active"), 900);
 }
 
 async function rateAnswer(messageId, rating, button){
@@ -265,6 +296,7 @@ async function send(){
     const msg = input.value.trim();
     if(!msg) return;
 
+    lastUserMessage = msg;
     addMsg(msg, "me");
     input.value = "";
 
@@ -275,11 +307,7 @@ async function send(){
         const res = await fetch(`${API}/chat/stream`, {
             method: "POST",
             headers: authHeaders(),
-            body: JSON.stringify({
-                message: msg,
-                web_search: searchMode === "web" || searchMode === "mixed",
-                search_mode: searchMode
-            })
+            body: JSON.stringify(buildChatPayload(msg))
         });
 
         if(res.status === 401){
@@ -315,11 +343,76 @@ async function send(){
                         activeConversationId = payload.conversation_id;
                     }
                     renderSourceCards(bot.row, payload);
-                    renderFeedback(bot.row, payload.message_id);
+                    renderFeedback(bot.row, payload.message_id, reply);
                 }
             }
         }
 
+        loadConversations();
+    }catch(err){
+        console.log(err);
+        removeLoadingMsg(loadingId);
+        addMsg(t("connectionFailed"), "bot");
+    }
+}
+
+function buildChatPayload(message, regenerate = false){
+    return {
+        message,
+        web_search: searchMode === "web" || searchMode === "mixed",
+        search_mode: searchMode,
+        regenerate
+    };
+}
+
+async function regenerateAnswer(){
+    const msg = lastUserMessage || [...chatBox.querySelectorAll(".message-row.me .msg")].pop()?.innerText || "";
+    if(!msg) return;
+
+    const loadingId = "loading-" + Date.now();
+    addLoadingMsg(loadingId);
+
+    try{
+        const res = await fetch(`${API}/chat/stream`, {
+            method: "POST",
+            headers: authHeaders(),
+            body: JSON.stringify(buildChatPayload(msg, true))
+        });
+
+        if(res.status === 401){
+            logout();
+            return;
+        }
+
+        removeLoadingMsg(loadingId);
+        const bot = addBotShell();
+        let reply = "";
+        let buffer = "";
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+
+        while(true){
+            const { value, done } = await reader.read();
+            if(done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const parts = buffer.split("\n\n");
+            buffer = parts.pop();
+
+            for(const part of parts){
+                if(!part.startsWith("data: ")) continue;
+                const payload = JSON.parse(part.slice(6));
+                if(payload.chunk){
+                    reply += payload.chunk;
+                    bot.bubble.innerHTML = marked.parse(reply);
+                    scrollBottom();
+                }
+                if(payload.done){
+                    renderSourceCards(bot.row, payload);
+                    renderFeedback(bot.row, payload.message_id, reply);
+                }
+            }
+        }
         loadConversations();
     }catch(err){
         console.log(err);
@@ -377,12 +470,17 @@ async function loadConversations(){
     const conversations = await res.json();
     conversationList.innerHTML = "";
 
-    if(!conversations.length){
+    const query = (conversationSearch?.value || "").trim().toLowerCase();
+    const filtered = query
+        ? conversations.filter(conversation => (conversation.title || "").toLowerCase().includes(query))
+        : conversations;
+
+    if(!filtered.length){
         conversationList.innerHTML = `<div class="empty-history">${t("noConversations")}</div>`;
         return;
     }
 
-    conversations.forEach(conversation => {
+    filtered.forEach(conversation => {
         const button = document.createElement("button");
         button.className = "conversation-item";
         if(conversation.id === activeConversationId || conversation.active){
@@ -414,6 +512,9 @@ async function loadConversation(conversationId){
     }else{
         messages.forEach(message => {
             addMsg(message.content, message.role === "user" ? "me" : "bot");
+            if(message.role === "user"){
+                lastUserMessage = message.content;
+            }
         });
     }
 

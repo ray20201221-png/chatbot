@@ -45,6 +45,34 @@ if(!localStorage.getItem("token") || localStorage.getItem("is_admin") !== "1"){
     </aside>
 
     <main class="admin-main">
+        <section class="admin-section admin-dashboard-section">
+            <div class="admin-section-title">
+                <div>
+                    <span class="eyebrow">Overview</span>
+                    <h2 data-i18n="dashboard">Dashboard</h2>
+                </div>
+            </div>
+            <div id="dashboardCards" class="dashboard-grid"></div>
+            <div class="analytics-grid">
+                <section class="analytics-panel">
+                    <h3 data-i18n="activity7d">7-day activity</h3>
+                    <div id="dashboardTrend" class="trend-list"></div>
+                </section>
+                <section class="analytics-panel">
+                    <h3 data-i18n="topDomains">Top domains</h3>
+                    <ul id="topDomains" class="domain-list"></ul>
+                </section>
+                <section class="analytics-panel">
+                    <h3 data-i18n="frequentQuestions">Frequent questions</h3>
+                    <ul id="frequentQuestions" class="domain-list"></ul>
+                </section>
+                <section class="analytics-panel">
+                    <h3 data-i18n="refusalStats">Refusal stats</h3>
+                    <div id="refusalStats" class="quality-meter"></div>
+                </section>
+            </div>
+        </section>
+
         <section class="admin-section">
             <div class="admin-section-title">
                 <div>

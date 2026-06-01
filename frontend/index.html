@@ -45,6 +45,13 @@ if(!localStorage.getItem("token")){
 
         <div class="sidebar-section">
             <h2 data-i18n="chatHistory">Chat history</h2>
+            <input
+                id="conversationSearch"
+                class="conversation-search"
+                placeholder="Search chats..."
+                data-i18n-placeholder="searchChats"
+                oninput="loadConversations()"
+            >
             <div id="conversationList" class="conversation-list"></div>
         </div>
 
