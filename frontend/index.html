@@ -77,6 +77,17 @@ if(!localStorage.getItem("token")){
         </div>
 
         <form class="composer" onsubmit="event.preventDefault(); send();">
+            <button
+                id="webSearchButton"
+                class="tool-button"
+                type="button"
+                onclick="toggleWebSearch()"
+                aria-pressed="false"
+                data-i18n-title="webSearchOff"
+                title="Web search off"
+            >
+                <i data-lucide="globe-2"></i>
+            </button>
             <input
                 id="msg"
                 placeholder="Message RUI AI..."

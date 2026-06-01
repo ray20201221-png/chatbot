@@ -7,7 +7,9 @@ const isAdmin = localStorage.getItem("is_admin") === "1";
 const adminButton = document.getElementById("adminButton");
 const userBadge = document.getElementById("userBadge");
 const conversationList = document.getElementById("conversationList");
+const webSearchButton = document.getElementById("webSearchButton");
 let activeConversationId = null;
+let webSearchEnabled = localStorage.getItem("web_search") === "1";
 
 document.body.classList.add("app-ready");
 
@@ -22,6 +24,20 @@ if(userBadge){
 
 if(window.lucide){
     lucide.createIcons();
+}
+
+function updateWebSearchButton(){
+    if(!webSearchButton) return;
+
+    webSearchButton.classList.toggle("active", webSearchEnabled);
+    webSearchButton.setAttribute("aria-pressed", String(webSearchEnabled));
+    webSearchButton.title = webSearchEnabled ? t("webSearchOn") : t("webSearchOff");
+}
+
+function toggleWebSearch(){
+    webSearchEnabled = !webSearchEnabled;
+    localStorage.setItem("web_search", webSearchEnabled ? "1" : "0");
+    updateWebSearchButton();
 }
 
 function authHeaders(){
@@ -138,7 +154,10 @@ async function send(){
         const res = await fetch(`${API}/chat`, {
             method: "POST",
             headers: authHeaders(),
-            body: JSON.stringify({ message: msg })
+            body: JSON.stringify({
+                message: msg,
+                web_search: webSearchEnabled
+            })
         });
 
         if(res.status === 401){
@@ -248,6 +267,8 @@ function logout(){
 
 function onLanguageChanged(){
     loadConversations();
+    updateWebSearchButton();
 }
 
+updateWebSearchButton();
 loadConversations();
