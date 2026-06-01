@@ -8,8 +8,9 @@ const adminButton = document.getElementById("adminButton");
 const userBadge = document.getElementById("userBadge");
 const conversationList = document.getElementById("conversationList");
 const webSearchButton = document.getElementById("webSearchButton");
+const searchModeSelect = document.getElementById("searchMode");
 let activeConversationId = null;
-let webSearchEnabled = localStorage.getItem("web_search") === "1";
+let searchMode = localStorage.getItem("search_mode") || (localStorage.getItem("web_search") === "1" ? "web" : "auto");
 
 document.body.classList.add("app-ready");
 
@@ -29,14 +30,27 @@ if(window.lucide){
 function updateWebSearchButton(){
     if(!webSearchButton) return;
 
+    const webSearchEnabled = searchMode === "web" || searchMode === "mixed";
     webSearchButton.classList.toggle("active", webSearchEnabled);
     webSearchButton.setAttribute("aria-pressed", String(webSearchEnabled));
     webSearchButton.title = webSearchEnabled ? t("webSearchOn") : t("webSearchOff");
+
+    if(searchModeSelect){
+        searchModeSelect.value = searchMode;
+    }
 }
 
 function toggleWebSearch(){
-    webSearchEnabled = !webSearchEnabled;
-    localStorage.setItem("web_search", webSearchEnabled ? "1" : "0");
+    searchMode = searchMode === "web" || searchMode === "mixed" ? "auto" : "web";
+    localStorage.setItem("search_mode", searchMode);
+    localStorage.setItem("web_search", searchMode === "web" || searchMode === "mixed" ? "1" : "0");
+    updateWebSearchButton();
+}
+
+function setSearchMode(mode){
+    searchMode = ["auto", "rag", "web", "mixed"].includes(mode) ? mode : "auto";
+    localStorage.setItem("search_mode", searchMode);
+    localStorage.setItem("web_search", searchMode === "web" || searchMode === "mixed" ? "1" : "0");
     updateWebSearchButton();
 }
 
@@ -50,6 +64,16 @@ function authHeaders(){
 function removeWelcome(){
     const welcome = document.getElementById("welcome");
     if(welcome) welcome.remove();
+}
+
+function escapeHtml(value){
+    return String(value || "").replace(/[&<>"']/g, char => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;"
+    }[char]));
 }
 
 function usePrompt(text){
@@ -81,6 +105,103 @@ function addMsg(text, type){
     row.appendChild(bubble);
     chatBox.appendChild(row);
     scrollBottom();
+    return row;
+}
+
+function addBotShell(){
+    removeWelcome();
+
+    const row = document.createElement("div");
+    row.className = "message-row bot";
+
+    const avatar = document.createElement("div");
+    avatar.className = "message-avatar";
+    avatar.innerText = "AI";
+
+    const bubble = document.createElement("div");
+    bubble.className = "msg";
+
+    row.appendChild(avatar);
+    row.appendChild(bubble);
+    chatBox.appendChild(row);
+    scrollBottom();
+
+    return { row, bubble };
+}
+
+function renderSourceCards(row, data){
+    const webSources = data.web_sources || [];
+    const ragSources = data.sources || [];
+    if(!webSources.length && !ragSources.length) return;
+
+    const panel = document.createElement("div");
+    panel.className = "source-panel";
+
+    webSources.forEach(source => {
+        const card = document.createElement("a");
+        card.className = "source-card";
+        card.href = source.url;
+        card.target = "_blank";
+        card.rel = "noopener noreferrer";
+        card.innerHTML = `
+            <span>${escapeHtml(source.provider || "web")}</span>
+            <strong>${escapeHtml(source.title || source.url)}</strong>
+            <p>${escapeHtml(source.snippet || "")}</p>
+        `;
+        panel.appendChild(card);
+    });
+
+    ragSources.forEach(source => {
+        const card = document.createElement("div");
+        card.className = "source-card";
+        card.innerHTML = `
+            <span>RAG</span>
+            <strong>${escapeHtml(source.source)}#${escapeHtml(source.chunk)}</strong>
+            <p>Score: ${escapeHtml(source.score)}</p>
+        `;
+        panel.appendChild(card);
+    });
+
+    row.appendChild(panel);
+}
+
+function renderFeedback(row, messageId){
+    if(!messageId) return;
+
+    const controls = document.createElement("div");
+    controls.className = "feedback-row";
+    controls.innerHTML = `
+        <button type="button" title="${t("goodAnswer")}" onclick="rateAnswer(${messageId}, 'up', this)">
+            <i data-lucide="thumbs-up"></i>
+        </button>
+        <button type="button" title="${t("badAnswer")}" onclick="rateAnswer(${messageId}, 'down', this)">
+            <i data-lucide="thumbs-down"></i>
+        </button>
+    `;
+    row.appendChild(controls);
+    if(window.lucide){
+        lucide.createIcons();
+    }
+}
+
+async function rateAnswer(messageId, rating, button){
+    try{
+        const res = await fetch(`${API}/feedback`, {
+            method: "POST",
+            headers: authHeaders(),
+            body: JSON.stringify({ message_id: messageId, rating })
+        });
+
+        if(res.status === 401){
+            logout();
+            return;
+        }
+
+        button.parentElement.querySelectorAll("button").forEach(item => item.classList.remove("active"));
+        button.classList.add("active");
+    }catch(err){
+        console.log(err);
+    }
 }
 
 function clearMessages(){
@@ -151,12 +272,13 @@ async function send(){
     addLoadingMsg(loadingId);
 
     try{
-        const res = await fetch(`${API}/chat`, {
+        const res = await fetch(`${API}/chat/stream`, {
             method: "POST",
             headers: authHeaders(),
             body: JSON.stringify({
                 message: msg,
-                web_search: webSearchEnabled
+                web_search: searchMode === "web" || searchMode === "mixed",
+                search_mode: searchMode
             })
         });
 
@@ -165,18 +287,62 @@ async function send(){
             return;
         }
 
-        const data = await res.json();
-        if(data.conversation_id){
-            activeConversationId = data.conversation_id;
-        }
         removeLoadingMsg(loadingId);
-        addMsg(data.reply || t("backendNoReply"), "bot");
+        const bot = addBotShell();
+        let reply = "";
+        let buffer = "";
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+
+        while(true){
+            const { value, done } = await reader.read();
+            if(done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const parts = buffer.split("\n\n");
+            buffer = parts.pop();
+
+            for(const part of parts){
+                if(!part.startsWith("data: ")) continue;
+                const payload = JSON.parse(part.slice(6));
+                if(payload.chunk){
+                    reply += payload.chunk;
+                    bot.bubble.innerHTML = marked.parse(reply);
+                    scrollBottom();
+                }
+                if(payload.done){
+                    if(payload.conversation_id){
+                        activeConversationId = payload.conversation_id;
+                    }
+                    renderSourceCards(bot.row, payload);
+                    renderFeedback(bot.row, payload.message_id);
+                }
+            }
+        }
+
         loadConversations();
     }catch(err){
         console.log(err);
         removeLoadingMsg(loadingId);
         addMsg(t("connectionFailed"), "bot");
     }
+}
+
+function exportChat(){
+    const rows = [...chatBox.querySelectorAll(".message-row")];
+    const content = rows.map(row => {
+        const role = row.classList.contains("me") ? username : "RUI AI";
+        const text = row.querySelector(".msg")?.innerText || "";
+        return `## ${role}\n\n${text}`;
+    }).join("\n\n");
+
+    const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `rui-ai-chat-${new Date().toISOString().slice(0, 10)}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
 }
 
 async function newChat(){

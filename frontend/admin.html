@@ -77,8 +77,33 @@ if(!localStorage.getItem("token") || localStorage.getItem("is_admin") !== "1"){
                     <i data-lucide="refresh-cw"></i>
                     <span data-i18n="reindex">重建索引</span>
                 </button>
+                <label class="small-button file-button" data-i18n-title="uploadKnowledge" title="Upload knowledge">
+                    <i data-lucide="upload"></i>
+                    <span data-i18n="uploadKnowledge">Upload knowledge</span>
+                    <input id="knowledgeUpload" type="file" accept=".txt,.md,.py,.pdf" onchange="uploadKnowledgeFile(this.files[0])">
+                </label>
             </div>
             <div id="ragStatus" class="rag-status"></div>
+        </section>
+
+        <section class="admin-section">
+            <div class="admin-section-title">
+                <div>
+                    <span class="eyebrow">Logs</span>
+                    <h2 data-i18n="searchLogs">Web Search logs</h2>
+                </div>
+            </div>
+            <div id="searchLogList" class="admin-messages"></div>
+        </section>
+
+        <section class="admin-section">
+            <div class="admin-section-title">
+                <div>
+                    <span class="eyebrow">Quality</span>
+                    <h2 data-i18n="feedback">Feedback</h2>
+                </div>
+            </div>
+            <div id="feedbackList" class="admin-messages"></div>
         </section>
     </main>
 </div>

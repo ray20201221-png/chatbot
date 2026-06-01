@@ -88,6 +88,21 @@ if(!localStorage.getItem("token")){
             >
                 <i data-lucide="globe-2"></i>
             </button>
+            <select id="searchMode" class="mode-select" onchange="setSearchMode(this.value)" data-i18n-title="searchMode" title="Search mode">
+                <option value="auto" data-i18n="modeAuto">Auto</option>
+                <option value="rag" data-i18n="modeRag">RAG</option>
+                <option value="web" data-i18n="modeWeb">Web</option>
+                <option value="mixed" data-i18n="modeMixed">Mixed</option>
+            </select>
+            <button
+                class="tool-button"
+                type="button"
+                onclick="exportChat()"
+                data-i18n-title="exportChat"
+                title="Export chat"
+            >
+                <i data-lucide="download"></i>
+            </button>
             <input
                 id="msg"
                 placeholder="Message RUI AI..."

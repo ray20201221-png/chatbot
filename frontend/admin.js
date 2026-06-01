@@ -7,6 +7,8 @@ const messageList = document.getElementById("messageList");
 const codeFile = document.getElementById("codeFile");
 const codeViewer = document.getElementById("codeViewer");
 const ragStatus = document.getElementById("ragStatus");
+const searchLogList = document.getElementById("searchLogList");
+const feedbackList = document.getElementById("feedbackList");
 
 let currentUser = null;
 let currentRagStatus = null;
@@ -133,6 +135,65 @@ async function rebuildRag(){
     loadRagStatus();
 }
 
+async function uploadKnowledgeFile(file){
+    if(!file) return;
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const res = await fetch(`${API}/admin/rag/upload`, {
+        method: "POST",
+        headers: authHeaders(),
+        body: formData
+    });
+
+    if(res.status === 401 || res.status === 403){
+        logout();
+        return;
+    }
+
+    if(!res.ok){
+        const data = await res.json();
+        alert(data.detail || "Upload failed");
+        return;
+    }
+
+    alert(t("uploadDone"));
+    document.getElementById("knowledgeUpload").value = "";
+    loadRagStatus();
+}
+
+async function loadSearchLogs(){
+    if(!searchLogList) return;
+
+    const logs = await apiGet("/admin/search-logs");
+    if(!logs) return;
+
+    searchLogList.innerHTML = logs.length ? "" : `<div class="empty-state">${t("noConversations")}</div>`;
+    logs.forEach(log => {
+        const div = document.createElement("div");
+        div.className = "admin-message bot";
+        const sourceCount = log.sources ? log.sources.length : 0;
+        div.innerText = `[${log.provider}] ${log.query}\nSources: ${sourceCount}\n${log.created_at || ""}`;
+        searchLogList.appendChild(div);
+    });
+}
+
+async function loadFeedback(){
+    if(!feedbackList) return;
+
+    const rows = await apiGet("/admin/feedback");
+    if(!rows) return;
+
+    feedbackList.innerHTML = rows.length ? "" : `<div class="empty-state">${t("emptyMessages")}</div>`;
+    rows.forEach(row => {
+        const div = document.createElement("div");
+        div.className = `admin-message ${row.rating === "up" ? "me" : "bot"}`;
+        div.innerText = `[${row.rating}] message #${row.message_id}\nuser #${row.user_id}\n${row.created_at || ""}`;
+        feedbackList.appendChild(div);
+    });
+}
+
 function onLanguageChanged(){
     renderRagStatus();
     if(currentUser){
@@ -153,3 +214,5 @@ function logout(){
 loadUsers();
 loadCodeFiles();
 loadRagStatus();
+loadSearchLogs();
+loadFeedback();
