@@ -10,6 +10,9 @@ const ragStatus = document.getElementById("ragStatus");
 const searchLogList = document.getElementById("searchLogList");
 const feedbackList = document.getElementById("feedbackList");
 const dashboardCards = document.getElementById("dashboardCards");
+const knowledgeCategory = document.getElementById("knowledgeCategory");
+const knowledgeSearch = document.getElementById("knowledgeSearch");
+const knowledgeFilter = document.getElementById("knowledgeFilter");
 
 let currentUser = null;
 let currentRagStatus = null;
@@ -204,7 +207,22 @@ function renderRagStatus(){
 
 async function loadRagStatus(){
     currentRagStatus = await apiGet("/admin/rag/status");
+    renderKnowledgeCategories();
     renderRagStatus();
+}
+
+function renderKnowledgeCategories(){
+    if(!currentRagStatus || !knowledgeFilter) return;
+
+    const selected = knowledgeFilter.value;
+    knowledgeFilter.innerHTML = `<option value="">${t("allCategories")}</option>`;
+    (currentRagStatus.categories || ["general"]).forEach(category => {
+        const option = document.createElement("option");
+        option.value = category;
+        option.innerText = category;
+        knowledgeFilter.appendChild(option);
+    });
+    knowledgeFilter.value = selected;
 }
 
 async function rebuildRag(){
@@ -227,6 +245,7 @@ async function uploadKnowledgeFile(file){
 
     const formData = new FormData();
     formData.append("file", file);
+    formData.append("category", knowledgeCategory?.value || "general");
 
     const res = await fetch(`${API}/admin/rag/upload`, {
         method: "POST",
@@ -256,6 +275,15 @@ async function previewKnowledgeFile(filename){
     if(!data) return;
 
     codeViewer.innerText = data.preview;
+}
+
+async function showKnowledgeVersions(filename){
+    const data = await apiGet(`/admin/rag/versions/${encodeURIComponent(filename)}`);
+    if(!data) return;
+
+    codeViewer.innerText = data.versions.length
+        ? data.versions.map(version => `${version.name} | ${version.size} bytes | ${version.created_at}`).join("\n")
+        : t("noVersions");
 }
 
 async function deleteKnowledgeFile(filename){
@@ -329,17 +357,29 @@ function onLanguageChanged(){
 function renderRagStatus(){
     if(!currentRagStatus) return;
 
-    const files = currentRagStatus.files.length
-        ? currentRagStatus.files.map(file => {
+    const query = (knowledgeSearch?.value || "").trim().toLowerCase();
+    const category = knowledgeFilter?.value || "";
+    const visibleFiles = currentRagStatus.files.filter(file => {
+        const item = typeof file === "string" ? { name: file, category: "general" } : file;
+        const matchesQuery = !query || item.name.toLowerCase().includes(query);
+        const matchesCategory = !category || item.category === category;
+        return matchesQuery && matchesCategory;
+    });
+
+    const files = visibleFiles.length
+        ? visibleFiles.map(file => {
             const item = typeof file === "string" ? { name: file } : file;
             return `
                 <li class="knowledge-file">
                     <span>
                         <strong>${escapeHtml(item.name)}</strong>
-                        <small>${escapeHtml(item.extension || "")} ${escapeHtml(item.size || 0)} bytes ${escapeHtml(item.modified_at || "")}</small>
+                        <small>${escapeHtml(item.category || "general")} | ${escapeHtml(item.extension || "")} | ${escapeHtml(item.size || 0)} bytes | v${escapeHtml((item.version_count || 0) + 1)} | ${escapeHtml(item.modified_at || "")}</small>
                     </span>
                     <button onclick="previewKnowledgeFile('${escapeHtml(item.name)}')" title="${t("preview")}">
                         <i data-lucide="eye"></i>
+                    </button>
+                    <button onclick="showKnowledgeVersions('${escapeHtml(item.name)}')" title="${t("versions")}">
+                        <i data-lucide="history"></i>
                     </button>
                     <button onclick="deleteKnowledgeFile('${escapeHtml(item.name)}')" title="${t("delete")}">
                         <i data-lucide="trash-2"></i>

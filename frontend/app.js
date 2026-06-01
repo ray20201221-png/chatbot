@@ -10,9 +10,11 @@ const conversationList = document.getElementById("conversationList");
 const conversationSearch = document.getElementById("conversationSearch");
 const webSearchButton = document.getElementById("webSearchButton");
 const searchModeSelect = document.getElementById("searchMode");
+const stopButton = document.getElementById("stopButton");
 let activeConversationId = null;
 let searchMode = localStorage.getItem("search_mode") || (localStorage.getItem("web_search") === "1" ? "web" : "auto");
 let lastUserMessage = "";
+let currentStreamController = null;
 
 document.body.classList.add("app-ready");
 
@@ -105,9 +107,32 @@ function addMsg(text, type){
 
     row.appendChild(avatar);
     row.appendChild(bubble);
+
+    if(type === "me"){
+        const actions = document.createElement("div");
+        actions.className = "message-actions";
+        actions.innerHTML = `
+            <button type="button" title="${t("editQuestion")}" onclick="editQuestion(this)">
+                <i data-lucide="pencil"></i>
+            </button>
+        `;
+        row.appendChild(actions);
+        if(window.lucide){
+            lucide.createIcons();
+        }
+    }
+
     chatBox.appendChild(row);
     scrollBottom();
     return row;
+}
+
+function editQuestion(button){
+    const row = button.closest(".message-row");
+    const text = row?.querySelector(".msg")?.innerText || "";
+    const input = document.getElementById("msg");
+    input.value = text;
+    input.focus();
 }
 
 function addBotShell(){
@@ -291,6 +316,19 @@ function scrollBottom(){
     chatBox.scrollTop = chatBox.scrollHeight;
 }
 
+function setStreaming(active){
+    currentStreamController = active ? new AbortController() : null;
+    if(stopButton){
+        stopButton.style.display = active ? "grid" : "none";
+    }
+}
+
+function stopGeneration(){
+    if(currentStreamController){
+        currentStreamController.abort();
+    }
+}
+
 async function send(){
     const input = document.getElementById("msg");
     const msg = input.value.trim();
@@ -304,10 +342,12 @@ async function send(){
     addLoadingMsg(loadingId);
 
     try{
+        setStreaming(true);
         const res = await fetch(`${API}/chat/stream`, {
             method: "POST",
             headers: authHeaders(),
-            body: JSON.stringify(buildChatPayload(msg))
+            body: JSON.stringify(buildChatPayload(msg)),
+            signal: currentStreamController.signal
         });
 
         if(res.status === 401){
@@ -352,7 +392,11 @@ async function send(){
     }catch(err){
         console.log(err);
         removeLoadingMsg(loadingId);
-        addMsg(t("connectionFailed"), "bot");
+        if(err.name !== "AbortError"){
+            addMsg(t("connectionFailed"), "bot");
+        }
+    }finally{
+        setStreaming(false);
     }
 }
 
@@ -373,10 +417,12 @@ async function regenerateAnswer(){
     addLoadingMsg(loadingId);
 
     try{
+        setStreaming(true);
         const res = await fetch(`${API}/chat/stream`, {
             method: "POST",
             headers: authHeaders(),
-            body: JSON.stringify(buildChatPayload(msg, true))
+            body: JSON.stringify(buildChatPayload(msg, true)),
+            signal: currentStreamController.signal
         });
 
         if(res.status === 401){
@@ -417,17 +463,32 @@ async function regenerateAnswer(){
     }catch(err){
         console.log(err);
         removeLoadingMsg(loadingId);
-        addMsg(t("connectionFailed"), "bot");
+        if(err.name !== "AbortError"){
+            addMsg(t("connectionFailed"), "bot");
+        }
+    }finally{
+        setStreaming(false);
     }
 }
 
 function exportChat(){
     const rows = [...chatBox.querySelectorAll(".message-row")];
-    const content = rows.map(row => {
+    const body = rows.map(row => {
         const role = row.classList.contains("me") ? username : "RUI AI";
         const text = row.querySelector(".msg")?.innerText || "";
-        return `## ${role}\n\n${text}`;
+        const sources = [...row.querySelectorAll(".source-card")].map(card => `- ${card.innerText.trim().replace(/\n+/g, " | ")}`);
+        const sourceBlock = sources.length ? `\n\n### Sources\n${sources.join("\n")}` : "";
+        return `## ${role}\n\n${text}${sourceBlock}`;
     }).join("\n\n");
+    const content = [
+        "# RUI AI Conversation Report",
+        "",
+        `- Exported: ${new Date().toLocaleString()}`,
+        `- Search mode: ${searchMode}`,
+        `- User: ${username}`,
+        "",
+        body
+    ].join("\n");
 
     const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
     const url = URL.createObjectURL(blob);

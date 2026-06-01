@@ -120,6 +120,17 @@ if(!localStorage.getItem("token")){
                 <i data-lucide="send-horizontal"></i>
                 <span data-i18n="send">Send</span>
             </button>
+            <button
+                id="stopButton"
+                class="tool-button stop-button"
+                type="button"
+                onclick="stopGeneration()"
+                data-i18n-title="stopGenerating"
+                title="Stop generating"
+                style="display:none"
+            >
+                <i data-lucide="square"></i>
+            </button>
         </form>
     </main>
 </div>
